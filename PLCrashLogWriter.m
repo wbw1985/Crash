@@ -50,11 +50,6 @@
 
 #import "PLCrashSysctl.h"
 
-#import "BaiduMobStatConfig.h"
-#import "BaiduMobStatLogManager.h"
-#import "PLCrashReporter.h"
-#import "PLCrashReportTextFormatter.h"
-
 #if TARGET_OS_IPHONE
 #import <UIKit/UIKit.h> // For UIDevice
 #endif
@@ -471,6 +466,7 @@ void plcrash_log_writer_set_exception (plcrash_log_writer_t *writer, NSException
             i++;
         }
     }
+
     /* Ensure that any signal handler has a consistent view of the above initialization. */
     OSMemoryBarrier();
 }
