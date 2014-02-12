@@ -42,13 +42,14 @@ struct _PLCrashReportDecoder {
 - (Plcrash__CrashReport *) decodeCrashData: (NSData *) data error: (NSError **) outError;
 - (PLCrashReportSystemInfo *) extractSystemInfo: (Plcrash__CrashReport__SystemInfo *) systemInfo error: (NSError **) outError;
 - (PLCrashReportProcessorInfo *) extractProcessorInfo: (Plcrash__CrashReport__Processor *) processorInfo error: (NSError **) outError;
-//- (PLCrashReportMachineInfo *) extractMachineInfo: (Plcrash__CrashReport__MachineInfo *) machineInfo error: (NSError **) outError;
-//- (PLCrashReportApplicationInfo *) extractApplicationInfo: (Plcrash__CrashReport__ApplicationInfo *) applicationInfo error: (NSError **) outError;
-//- (PLCrashReportProcessInfo *) extractProcessInfo: (Plcrash__CrashReport__ProcessInfo *) processInfo error: (NSError **) outError;
-//- (NSArray *) extractThreadInfo: (Plcrash__CrashReport *) crashReport error: (NSError **) outError;
+- (PLCrashReportMachineInfo *) extractMachineInfo: (Plcrash__CrashReport__MachineInfo *) machineInfo error: (NSError **) outError;
+- (PLCrashReportApplicationInfo *) extractApplicationInfo: (Plcrash__CrashReport__ApplicationInfo *) applicationInfo error: (NSError **) outError;
+- (PLCrashReportProcessInfo *) extractProcessInfo: (Plcrash__CrashReport__ProcessInfo *) processInfo error: (NSError **) outError;
+- (NSArray *) extractThreadInfo: (Plcrash__CrashReport *) crashReport error: (NSError **) outError;
 - (NSArray *) extractImageInfo: (Plcrash__CrashReport *) crashReport error: (NSError **) outError;
 - (PLCrashReportExceptionInfo *) extractExceptionInfo: (Plcrash__CrashReport__Exception *) exceptionInfo error: (NSError **) outError;
 - (PLCrashReportSignalInfo *) extractSignalInfo: (Plcrash__CrashReport__Signal *) signalInfo error: (NSError **) outError;
+- (PLCrashReportMachExceptionInfo *) extractMachExceptionInfo: (Plcrash__CrashReport__Signal__MachException *) machExceptionInfo error: (NSError **) outError;
 
 @end
 
@@ -116,34 +117,41 @@ static void populate_nserror (NSError **error, PLCrashReporterError code, NSStri
     if (!_systemInfo)
         goto error;
     
-//    /* Machine info */
-//    if (_decoder->crashReport->machine_info != NULL) {
-//        _machineInfo = [[self extractMachineInfo: _decoder->crashReport->machine_info error: outError] retain];
-//        if (!_machineInfo)
-//            goto error;
-//    }
+    /* Machine info */
+    if (_decoder->crashReport->machine_info != NULL) {
+        _machineInfo = [[self extractMachineInfo: _decoder->crashReport->machine_info error: outError] retain];
+        if (!_machineInfo)
+            goto error;
+    }
 
     /* Application info */
-//    _applicationInfo = [[self extractApplicationInfo: _decoder->crashReport->application_info error: outError] retain];
-//    if (!_applicationInfo)
-//        goto error;
+    _applicationInfo = [[self extractApplicationInfo: _decoder->crashReport->application_info error: outError] retain];
+    if (!_applicationInfo)
+        goto error;
     
     /* Process info. Handle missing info gracefully -- it is only included in v1.1+ crash reports. */
-//    if (_decoder->crashReport->process_info != NULL) {
-//        _processInfo = [[self extractProcessInfo: _decoder->crashReport->process_info error:outError] retain];
-//        if (!_processInfo)
-//            goto error;
-//    }
+    if (_decoder->crashReport->process_info != NULL) {
+        _processInfo = [[self extractProcessInfo: _decoder->crashReport->process_info error:outError] retain];
+        if (!_processInfo)
+            goto error;
+    }
 
     /* Signal info */
     _signalInfo = [[self extractSignalInfo: _decoder->crashReport->signal error: outError] retain];
     if (!_signalInfo)
         goto error;
 
+    /* Mach exception info */
+    if (_decoder->crashReport->signal != NULL && _decoder->crashReport->signal->mach_exception != NULL) {
+        _machExceptionInfo = [[self extractMachExceptionInfo: _decoder->crashReport->signal->mach_exception error: outError] retain];
+        if (!_machExceptionInfo)
+            goto error;
+    }
+
     /* Thread info */
-//    _threads = [[self extractThreadInfo: _decoder->crashReport error: outError] retain];
-//    if (!_threads)
-//        goto error;
+    _threads = [[self extractThreadInfo: _decoder->crashReport error: outError] retain];
+    if (!_threads)
+        goto error;
 
     /* Image info */
     _images = [[self extractImageInfo: _decoder->crashReport error: outError] retain];
@@ -167,11 +175,12 @@ error:
 - (void) dealloc {
     /* Free the data objects */
     [_systemInfo release];
-//    [_machineInfo release];
-//    [_applicationInfo release];
-//    [_processInfo release];
+    [_machineInfo release];
+    [_applicationInfo release];
+    [_processInfo release];
     [_signalInfo release];
-//    [_threads release];
+    [_machExceptionInfo release];
+    [_threads release];
     [_images release];
     [_exceptionInfo release];
     
@@ -208,18 +217,18 @@ error:
 }
 
 // property getter. Returns YES if machine information is available.
-//- (BOOL) hasMachineInfo {
-//    if (_machineInfo != nil)
-//        return YES;
-//    return NO;
-//}
+- (BOOL) hasMachineInfo {
+    if (_machineInfo != nil)
+        return YES;
+    return NO;
+}
 
 // property getter. Returns YES if process information is available.
-//- (BOOL) hasProcessInfo {
-//    if (_processInfo != nil)
-//        return YES;
-//    return NO;
-//}
+- (BOOL) hasProcessInfo {
+    if (_processInfo != nil)
+        return YES;
+    return NO;
+}
 
 // property getter. Returns YES if exception information is available.
 - (BOOL) hasExceptionInfo {
@@ -229,11 +238,12 @@ error:
 }
 
 @synthesize systemInfo = _systemInfo;
-//@synthesize machineInfo = _machineInfo;
-//@synthesize applicationInfo = _applicationInfo;
-//@synthesize processInfo = _processInfo;
+@synthesize machineInfo = _machineInfo;
+@synthesize applicationInfo = _applicationInfo;
+@synthesize processInfo = _processInfo;
 @synthesize signalInfo = _signalInfo;
-//@synthesize threads = _threads;
+@synthesize machExceptionInfo = _machExceptionInfo;
+@synthesize threads = _threads;
 @synthesize images = _images;
 @synthesize exceptionInfo = _exceptionInfo;
 @synthesize uuidRef = _uuid;
@@ -330,7 +340,7 @@ error:
                                                            timestamp: timestamp] autorelease];
 }
 
-/** 
+/**
  * Extract processor information from the crash log. Returns nil on error.
  */
 - (PLCrashReportProcessorInfo *) extractProcessorInfo: (Plcrash__CrashReport__Processor *) processorInfo error: (NSError **) outError {   
@@ -350,116 +360,122 @@ error:
 /**
  * Extract machine information from the crash log. Returns nil on error.
  */
-//- (PLCrashReportMachineInfo *) extractMachineInfo: (Plcrash__CrashReport__MachineInfo *) machineInfo error: (NSError **) outError {
-//    NSString *model = nil;
-//    PLCrashReportProcessorInfo *processorInfo = nil;
-//
-//    /* Validate */
-//    if (machineInfo == NULL) {
-//        populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid, 
-//                         NSLocalizedString(@"Crash report is missing Machine Information section", 
-//                                           @"Missing machine_info in crash report"));
-//        return nil;
-//    }
-//
-//    /* Set up the model, if available */
-//    if (machineInfo->model != NULL)
-//        model = [NSString stringWithUTF8String: machineInfo->model];
-//
-//    /* Set up the processor info. */
-//    if (machineInfo->processor != NULL) {
-//        processorInfo = [self extractProcessorInfo: machineInfo->processor error: outError];
-//        if (processorInfo == nil)
-//            return nil;
-//    }
-//
-//    /* Done */
-//    return [[[PLCrashReportMachineInfo alloc] initWithModelName: model
-//                                                  processorInfo: processorInfo
-//                                                 processorCount: machineInfo->processor_count
-//                                          logicalProcessorCount: machineInfo->logical_processor_count] autorelease];
-//}
+- (PLCrashReportMachineInfo *) extractMachineInfo: (Plcrash__CrashReport__MachineInfo *) machineInfo error: (NSError **) outError {
+    NSString *model = nil;
+    PLCrashReportProcessorInfo *processorInfo = nil;
+
+    /* Validate */
+    if (machineInfo == NULL) {
+        populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid, 
+                         NSLocalizedString(@"Crash report is missing Machine Information section", 
+                                           @"Missing machine_info in crash report"));
+        return nil;
+    }
+
+    /* Set up the model, if available */
+    if (machineInfo->model != NULL)
+        model = [NSString stringWithUTF8String: machineInfo->model];
+
+    /* Set up the processor info. */
+    if (machineInfo->processor != NULL) {
+        processorInfo = [self extractProcessorInfo: machineInfo->processor error: outError];
+        if (processorInfo == nil)
+            return nil;
+    }
+
+    /* Done */
+    return [[[PLCrashReportMachineInfo alloc] initWithModelName: model
+                                                  processorInfo: processorInfo
+                                                 processorCount: machineInfo->processor_count
+                                          logicalProcessorCount: machineInfo->logical_processor_count] autorelease];
+}
 
 /**
  * Extract application information from the crash log. Returns nil on error.
  */
-//- (PLCrashReportApplicationInfo *) extractApplicationInfo: (Plcrash__CrashReport__ApplicationInfo *) applicationInfo 
-//                                                    error: (NSError **) outError
-//{    
-//    /* Validate */
-//    if (applicationInfo == NULL) {
-//        populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid, 
-//                         NSLocalizedString(@"Crash report is missing Application Information section", 
-//                                           @"Missing app info in crash report"));
-//        return nil;
-//    }
-//
-//    /* Identifier available? */
-//    if (applicationInfo->identifier == NULL) {
-//        populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid, 
-//                         NSLocalizedString(@"Crash report is missing Application Information app identifier field", 
-//                                           @"Missing app identifier in crash report"));
-//        return nil;
-//    }
-//
-//    /* Version available? */
-//    if (applicationInfo->version == NULL) {
-//        populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid, 
-//                         NSLocalizedString(@"Crash report is missing Application Information app version field", 
-//                                           @"Missing app version in crash report"));
-//        return nil;
-//    }
-//    
-//    /* Done */
-//    NSString *identifier = [NSString stringWithUTF8String: applicationInfo->identifier];
-//    NSString *version = [NSString stringWithUTF8String: applicationInfo->version];
-//
-//    return [[[PLCrashReportApplicationInfo alloc] initWithApplicationIdentifier: identifier
-//                                                          applicationVersion: version] autorelease];
-//}
+- (PLCrashReportApplicationInfo *) extractApplicationInfo: (Plcrash__CrashReport__ApplicationInfo *) applicationInfo 
+                                                    error: (NSError **) outError
+{    
+    /* Validate */
+    if (applicationInfo == NULL) {
+        populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid, 
+                         NSLocalizedString(@"Crash report is missing Application Information section", 
+                                           @"Missing app info in crash report"));
+        return nil;
+    }
+
+    /* Identifier available? */
+    if (applicationInfo->identifier == NULL) {
+        populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid, 
+                         NSLocalizedString(@"Crash report is missing Application Information app identifier field", 
+                                           @"Missing app identifier in crash report"));
+        return nil;
+    }
+
+    /* Version available? */
+    if (applicationInfo->version == NULL) {
+        populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid, 
+                         NSLocalizedString(@"Crash report is missing Application Information app version field", 
+                                           @"Missing app version in crash report"));
+        return nil;
+    }
+    
+    /* Done */
+    NSString *identifier = [NSString stringWithUTF8String: applicationInfo->identifier];
+    NSString *version = [NSString stringWithUTF8String: applicationInfo->version];
+
+    return [[[PLCrashReportApplicationInfo alloc] initWithApplicationIdentifier: identifier
+                                                          applicationVersion: version] autorelease];
+}
 
 
 /**
  * Extract process information from the crash log. Returns nil on error.
  */
-//- (PLCrashReportProcessInfo *) extractProcessInfo: (Plcrash__CrashReport__ProcessInfo *) processInfo 
-//                                            error: (NSError **) outError
-//{    
-//    /* Validate */
-//    if (processInfo == NULL) {
-//        populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid, 
-//                         NSLocalizedString(@"Crash report is missing Process Information section", 
-//                                           @"Missing process info in crash report"));
-//        return nil;
-//    }
-//    
-//    /* Name available? */
-//    NSString *processName = nil;
-//    if (processInfo->process_name != NULL)
-//        processName = [NSString stringWithUTF8String: processInfo->process_name];
-//    
-//    /* Path available? */
-//    NSString *processPath = nil;
-//    if (processInfo->process_path != NULL)
-//        processPath = [NSString stringWithUTF8String: processInfo->process_path];
-//    
-//    /* Parent Name available? */
-//    NSString *parentProcessName = nil;
-//    if (processInfo->parent_process_name != NULL)
-//        parentProcessName = [NSString stringWithUTF8String: processInfo->parent_process_name];
-//
-//    /* Required elements */
-//    NSUInteger processID = processInfo->process_id;
-//    NSUInteger parentProcessID = processInfo->parent_process_id;
-//
-//    /* Done */
-//    return [[[PLCrashReportProcessInfo alloc] initWithProcessName: processName
-//                                                        processID: processID
-//                                                      processPath: processPath
-//                                                parentProcessName: parentProcessName
-//                                                  parentProcessID: parentProcessID
-//                                                           native: processInfo->native] autorelease];
-//}
+- (PLCrashReportProcessInfo *) extractProcessInfo: (Plcrash__CrashReport__ProcessInfo *) processInfo 
+                                            error: (NSError **) outError
+{    
+    /* Validate */
+    if (processInfo == NULL) {
+        populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid, 
+                         NSLocalizedString(@"Crash report is missing Process Information section", 
+                                           @"Missing process info in crash report"));
+        return nil;
+    }
+    
+    /* Name available? */
+    NSString *processName = nil;
+    if (processInfo->process_name != NULL)
+        processName = [NSString stringWithUTF8String: processInfo->process_name];
+    
+    /* Path available? */
+    NSString *processPath = nil;
+    if (processInfo->process_path != NULL)
+        processPath = [NSString stringWithUTF8String: processInfo->process_path];
+
+    /* Start time available? */
+    NSDate *startTime = nil;
+    if (processInfo->has_start_time)
+        startTime = [NSDate dateWithTimeIntervalSince1970: processInfo->start_time];
+    
+    /* Parent Name available? */
+    NSString *parentProcessName = nil;
+    if (processInfo->parent_process_name != NULL)
+        parentProcessName = [NSString stringWithUTF8String: processInfo->parent_process_name];
+
+    /* Required elements */
+    NSUInteger processID = processInfo->process_id;
+    NSUInteger parentProcessID = processInfo->parent_process_id;
+
+    /* Done */
+    return [[[PLCrashReportProcessInfo alloc] initWithProcessName: processName
+                                                        processID: processID
+                                                      processPath: processPath
+                                                 processStartTime: startTime
+                                                parentProcessName: parentProcessName
+                                                  parentProcessID: parentProcessID
+                                                           native: processInfo->native] autorelease];
+}
 
 /**
  * Extract symbol information from the crash log. Returns nil on error, or a PLCrashReportSymbolInfo
@@ -506,58 +522,58 @@ error:
  * Extract thread information from the crash log. Returns nil on error, or an array of PLCrashLogThreadInfo
  * instances on success.
  */
-//- (NSArray *) extractThreadInfo: (Plcrash__CrashReport *) crashReport error: (NSError **) outError {
-//    /* There should be at least one thread */
-//    if (crashReport->n_threads == 0) {
-//        populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid,
-//                         NSLocalizedString(@"Crash report is missing thread state information",
-//                                           @"Missing thread info in crash report"));
-//        return nil;
-//    }
-//
-//    /* Handle all threads */
-//    NSMutableArray *threadResult = [NSMutableArray arrayWithCapacity: crashReport->n_threads];
-//    for (size_t thr_idx = 0; thr_idx < crashReport->n_threads; thr_idx++) {
-//        Plcrash__CrashReport__Thread *thread = crashReport->threads[thr_idx];
-//        
-//        /* Fetch stack frames for this thread */
-//        NSMutableArray *frames = [NSMutableArray arrayWithCapacity: thread->n_frames];
-//        for (size_t frame_idx = 0; frame_idx < thread->n_frames; frame_idx++) {
-//            Plcrash__CrashReport__Thread__StackFrame *frame = thread->frames[frame_idx];
-//            PLCrashReportStackFrameInfo *frameInfo = [self extractStackFrameInfo: frame error: outError];
-//            if (frameInfo == nil)
-//                return nil;
-//
-//            [frames addObject: frameInfo];
-//        }
-//
-//        /* Fetch registers for this thread */
-//        NSMutableArray *registers = [NSMutableArray arrayWithCapacity: thread->n_registers];
-//        for (size_t reg_idx = 0; reg_idx < thread->n_registers; reg_idx++) {
-//            Plcrash__CrashReport__Thread__RegisterValue *reg = thread->registers[reg_idx];
-//            PLCrashReportRegisterInfo *regInfo;
-//
-//            /* Handle missing register name (should not occur!) */
-//            if (reg->name == NULL) {
-//                populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid, @"Missing register name in register value");
-//                return nil;
-//            }
-//
-//            regInfo = [[[PLCrashReportRegisterInfo alloc] initWithRegisterName: [NSString stringWithUTF8String: reg->name]
-//                                                              registerValue: reg->value] autorelease];
-//            [registers addObject: regInfo];
-//        }
-//
-//        /* Create the thread info instance */
-//        PLCrashReportThreadInfo *threadInfo = [[[PLCrashReportThreadInfo alloc] initWithThreadNumber: thread->thread_number
-//                                                                                   stackFrames: frames 
-//                                                                                       crashed: thread->crashed 
-//                                                                                     registers: registers] autorelease];
-//        [threadResult addObject: threadInfo];
-//    }
-//    
-//    return threadResult;
-//}
+- (NSArray *) extractThreadInfo: (Plcrash__CrashReport *) crashReport error: (NSError **) outError {
+    /* There should be at least one thread */
+    if (crashReport->n_threads == 0) {
+        populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid,
+                         NSLocalizedString(@"Crash report is missing thread state information",
+                                           @"Missing thread info in crash report"));
+        return nil;
+    }
+
+    /* Handle all threads */
+    NSMutableArray *threadResult = [NSMutableArray arrayWithCapacity: crashReport->n_threads];
+    for (size_t thr_idx = 0; thr_idx < crashReport->n_threads; thr_idx++) {
+        Plcrash__CrashReport__Thread *thread = crashReport->threads[thr_idx];
+        
+        /* Fetch stack frames for this thread */
+        NSMutableArray *frames = [NSMutableArray arrayWithCapacity: thread->n_frames];
+        for (size_t frame_idx = 0; frame_idx < thread->n_frames; frame_idx++) {
+            Plcrash__CrashReport__Thread__StackFrame *frame = thread->frames[frame_idx];
+            PLCrashReportStackFrameInfo *frameInfo = [self extractStackFrameInfo: frame error: outError];
+            if (frameInfo == nil)
+                return nil;
+
+            [frames addObject: frameInfo];
+        }
+
+        /* Fetch registers for this thread */
+        NSMutableArray *registers = [NSMutableArray arrayWithCapacity: thread->n_registers];
+        for (size_t reg_idx = 0; reg_idx < thread->n_registers; reg_idx++) {
+            Plcrash__CrashReport__Thread__RegisterValue *reg = thread->registers[reg_idx];
+            PLCrashReportRegisterInfo *regInfo;
+
+            /* Handle missing register name (should not occur!) */
+            if (reg->name == NULL) {
+                populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid, @"Missing register name in register value");
+                return nil;
+            }
+
+            regInfo = [[[PLCrashReportRegisterInfo alloc] initWithRegisterName: [NSString stringWithUTF8String: reg->name]
+                                                              registerValue: reg->value] autorelease];
+            [registers addObject: regInfo];
+        }
+
+        /* Create the thread info instance */
+        PLCrashReportThreadInfo *threadInfo = [[[PLCrashReportThreadInfo alloc] initWithThreadNumber: thread->thread_number
+                                                                                   stackFrames: frames 
+                                                                                       crashed: thread->crashed 
+                                                                                     registers: registers] autorelease];
+        [threadResult addObject: threadInfo];
+    }
+    
+    return threadResult;
+}
 
 
 /**
@@ -705,6 +721,38 @@ error:
     NSString *code = [NSString stringWithUTF8String: signalInfo->code];
     
     return [[[PLCrashReportSignalInfo alloc] initWithSignalName: name code: code address: signalInfo->address] autorelease];
+}
+
+/**
+ * Extract Mach exception information from the crash log. Returns nil on error.
+ */
+- (PLCrashReportMachExceptionInfo *) extractMachExceptionInfo: (Plcrash__CrashReport__Signal__MachException *) machExceptionInfo
+                                                        error: (NSError **) outError
+{
+    /* Validate */
+    if (machExceptionInfo == NULL) {
+        populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid,
+                         NSLocalizedString(@"Crash report is missing Mach Exception Information section",
+                                           @"Missing mach exception info in crash report"));
+        return nil;
+    }
+    
+    /* Sanity check; there should really only ever be 2 */
+    if (machExceptionInfo->n_codes > UINT8_MAX) {
+        populate_nserror(outError, PLCrashReporterErrorCrashReportInvalid,
+                         NSLocalizedString(@"Crash report includes too many Mach Exception codes",
+                                           @"Invalid mach exception info in crash report"));
+        return nil;
+    }
+    
+    /* Extract the codes */
+    NSMutableArray *codes = [NSMutableArray arrayWithCapacity: machExceptionInfo->n_codes];
+    for (size_t i = 0; i < machExceptionInfo->n_codes; i++) {
+        [codes addObject: [NSNumber numberWithUnsignedLongLong: machExceptionInfo->codes[i]]];
+    }
+    
+    /* Done */
+    return [[[PLCrashReportMachExceptionInfo alloc] initWithType: machExceptionInfo->type codes: codes] autorelease];
 }
 
 @end

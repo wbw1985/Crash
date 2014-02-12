@@ -43,17 +43,11 @@
 #import "PLCrashReport.h"
 #import "PLCrashLogWriter.h"
 #import "PLCrashLogWriterEncoding.h"
-#import "PLCrashAsync.h"
 #import "PLCrashAsyncSignalInfo.h"
 #import "PLCrashAsyncSymbolication.h"
-#import "PLCrashFrameWalker.h"
 
 #import "PLCrashSysctl.h"
-
-#import "BaiduMobStatConfig.h"
-#import "BaiduMobStatLogManager.h"
-#import "PLCrashReporter.h"
-#import "PLCrashReportTextFormatter.h"
+#import "PLCrashProcessInfo.h"
 
 #if TARGET_OS_IPHONE
 #import <UIKit/UIKit.h> // For UIDevice
@@ -184,7 +178,17 @@ enum {
     /** CrashReport.signal.address */
     PLCRASH_PROTO_SIGNAL_ADDRESS_ID = 3,
     
+    /** CrashReport.signal.mach_exception */
+    PLCRASH_PROTO_SIGNAL_MACH_EXCEPTION_ID = 4,
     
+    
+    /** CrashReport.signal.mach_exception.type */
+    PLCRASH_PROTO_SIGNAL_MACH_EXCEPTION_TYPE_ID = 1,
+    
+    /** CrashReport.signal.mach_exception.codes */
+    PLCRASH_PROTO_SIGNAL_MACH_EXCEPTION_CODES_ID = 2,
+
+
     /** CrashReport.process_info */
     PLCRASH_PROTO_PROCESS_INFO_ID = 7,
     
@@ -205,6 +209,9 @@ enum {
     
     /** CrashReport.process_info.native */
     PLCRASH_PROTO_PROCESS_INFO_NATIVE_ID = 6,
+    
+    /** CrashReport.process_info.start_time */
+    PLCRASH_PROTO_PROCESS_INFO_START_TIME_ID = 7,
 
     
     /** CrashReport.Processor.encoding */
@@ -250,6 +257,7 @@ enum {
  * @param writer Writer instance to be initialized.
  * @param app_identifier Unique per-application identifier. On Mac OS X, this is likely the CFBundleIdentifier.
  * @param app_version Application version string.
+ * @param symbol_strategy The strategy to use for local symbolication.
  * @param user_requested If true, the written report will be marked as a 'generated' non-crash report, rather than as
  * a true crash report created upon an actual crash.
  *
@@ -261,10 +269,14 @@ enum {
 plcrash_error_t plcrash_log_writer_init (plcrash_log_writer_t *writer,
                                          NSString *app_identifier,
                                          NSString *app_version,
+                                         plcrash_async_symbol_strategy_t symbol_strategy,
                                          BOOL user_requested)
 {
     /* Default to 0 */
     memset(writer, 0, sizeof(*writer));
+
+    /* Initialize configuration */
+    writer->symbol_strategy = symbol_strategy;
 
     /* Default to false */
     writer->report_info.user_requested = user_requested;
@@ -287,24 +299,21 @@ plcrash_error_t plcrash_log_writer_init (plcrash_log_writer_t *writer,
     
     /* Fetch the process information */
     {
-        /* MIB used to fetch process info */
-        struct kinfo_proc process_info;
-        size_t process_info_len = sizeof(process_info);
-        int process_info_mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, 0 };
-        int process_info_mib_len = 4;
-
         /* Current process */
-        {            
-            /* Retrieve PID */
-            writer->process_info.process_id = getpid();
+        PLCrashProcessInfo *pinfo = [PLCrashProcessInfo currentProcessInfo];
+        if (pinfo == nil) {
+            /* Should only occur if the process is no longer valid */
+            PLCF_DEBUG("Could not retreive process info for target");
+            return PLCRASH_EINVAL;
+        }
 
-            /* Retrieve name */
-            process_info_mib[3] = writer->process_info.process_id;
-            if (sysctl(process_info_mib, process_info_mib_len, &process_info, &process_info_len, NULL, 0) == 0) {
-                writer->process_info.process_name = strdup(process_info.kp_proc.p_comm);
-            } else {
-                PLCF_DEBUG("Could not retreive process name: %s", strerror(errno));
-            }
+        {
+            /* Retrieve PID */
+            writer->process_info.process_id = pinfo.processID;
+
+            /* Retrieve name and start time. */
+            writer->process_info.process_name = strdup([pinfo.processName UTF8String]);
+            writer->process_info.start_time = pinfo.startTime.tv_sec;
 
             /* Retrieve path */
             char *process_path = NULL;
@@ -319,14 +328,14 @@ plcrash_error_t plcrash_log_writer_init (plcrash_log_writer_t *writer,
         }
 
         /* Parent process */
-        {            
+        {
             /* Retrieve PID */
-            writer->process_info.parent_process_id = getppid();
+            writer->process_info.parent_process_id = pinfo.parentProcessID;
 
             /* Retrieve name */
-            process_info_mib[3] = writer->process_info.parent_process_id;
-            if (sysctl(process_info_mib, process_info_mib_len, &process_info, &process_info_len, NULL, 0) == 0) {
-                writer->process_info.parent_process_name = strdup(process_info.kp_proc.p_comm);
+            PLCrashProcessInfo *parentInfo = [[[PLCrashProcessInfo alloc] initWithProcessID: pinfo.parentProcessID] autorelease];
+            if (parentInfo != nil) {
+                writer->process_info.parent_process_name = strdup([parentInfo.processName UTF8String]);
             } else {
                 PLCF_DEBUG("Could not retreive parent process name: %s", strerror(errno));
             }
@@ -471,6 +480,7 @@ void plcrash_log_writer_set_exception (plcrash_log_writer_t *writer, NSException
             i++;
         }
     }
+
     /* Ensure that any signal handler has a consistent view of the above initialization. */
     OSMemoryBarrier();
 }
@@ -654,13 +664,15 @@ static size_t plcrash_writer_write_app_info (plcrash_async_file_t *file, const c
  * @param parent_process_name Parent process name
  * @param parent_process_id Parent process ID
  * @param native If false, process is running under emulation.
+ * @param start_time The start time of the process.
  */
-static size_t plcrash_writer_write_process_info (plcrash_async_file_t *file, const char *process_name, 
+static size_t plcrash_writer_write_process_info (plcrash_async_file_t *file, const char *process_name,
                                                  const pid_t process_id, const char *process_path, 
                                                  const char *parent_process_name, const pid_t parent_process_id,
-                                                 bool native) 
+                                                 bool native, time_t start_time)
 {
     size_t rv = 0;
+    uint64_t tval;
 
     /*
      * In the current crash reporter serialization format, pid values are serialized as unsigned 32-bit integers. This
@@ -684,10 +696,11 @@ static size_t plcrash_writer_write_process_info (plcrash_async_file_t *file, con
     /* Process path */
     if (process_path != NULL)
         rv += plcrash_writer_pack(file, PLCRASH_PROTO_PROCESS_INFO_PROCESS_PATH_ID, PLPROTOBUF_C_TYPE_STRING, process_path);
-
+    
     /* Parent process name */
     if (parent_process_name != NULL)
         rv += plcrash_writer_pack(file, PLCRASH_PROTO_PROCESS_INFO_PARENT_PROCESS_NAME_ID, PLPROTOBUF_C_TYPE_STRING, parent_process_name);
+    
 
     /* Parent process ID */
     pidval = parent_process_id;
@@ -695,6 +708,10 @@ static size_t plcrash_writer_write_process_info (plcrash_async_file_t *file, con
 
     /* Native process. */
     rv += plcrash_writer_pack(file, PLCRASH_PROTO_PROCESS_INFO_NATIVE_ID, PLPROTOBUF_C_TYPE_BOOL, &native);
+    
+    /* Start time */
+    tval = start_time;
+    rv += plcrash_writer_pack(file, PLCRASH_PROTO_PROCESS_INFO_START_TIME_ID, PLPROTOBUF_C_TYPE_UINT64, &tval);
 
     return rv;
 }
@@ -707,7 +724,7 @@ static size_t plcrash_writer_write_process_info (plcrash_async_file_t *file, con
  * @param file Output file
  * @param cursor The cursor from which to acquire frame data.
  */
-static size_t plcrash_writer_write_thread_register (plcrash_async_file_t *file, const char *regname, plframe_greg_t regval) {
+static size_t plcrash_writer_write_thread_register (plcrash_async_file_t *file, const char *regname, plcrash_greg_t regval) {
     uint64_t uint64val;
     size_t rv = 0;
 
@@ -727,44 +744,29 @@ static size_t plcrash_writer_write_thread_register (plcrash_async_file_t *file, 
  * Write all thread backtrace register messages
  *
  * @param file Output file
- * @param cursor The cursor from which to acquire frame data.
+ * @param task The task from which @a uap was derived. All memory accesses will be mapped from this task.
+ * @param cursor The cursor from which to acquire frame registers.
  */
-static size_t plcrash_writer_write_thread_registers (plcrash_async_file_t *file, ucontext_t *uap) {
-    plframe_cursor_t cursor;
+static size_t plcrash_writer_write_thread_registers (plcrash_async_file_t *file, task_t task, plframe_cursor_t *cursor) {
     plframe_error_t frame_err;
-    uint32_t regCount;
+    uint32_t regCount = plframe_cursor_get_regcount(cursor);
     size_t rv = 0;
-
-    /* Last is an index value, so increment to get the count */
-    regCount = PLFRAME_REG_LAST + 1;
-
-    /* Create the crashed thread frame cursor */
-    if ((frame_err = plframe_cursor_init(&cursor, uap)) != PLFRAME_ESUCCESS) {
-        PLCF_DEBUG("Failed to initialize frame cursor for crashed thread: %s", plframe_strerror(frame_err));
-        return 0;
-    }
-    
-    /* Fetch the first frame */
-    if ((frame_err = plframe_cursor_next(&cursor)) != PLFRAME_ESUCCESS) {
-        PLCF_DEBUG("Could not fetch crashed thread frame: %s", plframe_strerror(frame_err));
-        return 0;
-    }
     
     /* Write out register messages */
     for (int i = 0; i < regCount; i++) {
-        plframe_greg_t regVal;
+        plcrash_greg_t regVal;
         const char *regname;
         uint32_t msgsize;
 
         /* Fetch the register value */
-        if ((frame_err = plframe_get_reg(&cursor, i, &regVal)) != PLFRAME_ESUCCESS) {
+        if ((frame_err = plframe_cursor_get_reg(cursor, i, &regVal)) != PLFRAME_ESUCCESS) {
             // Should never happen
             PLCF_DEBUG("Could not fetch register %i value: %s", i, plframe_strerror(frame_err));
             regVal = 0;
         }
 
         /* Fetch the register name */
-        regname = plframe_get_regname(i);
+        regname = plframe_cursor_get_regname(cursor, i);
 
         /* Get the register message size */
         msgsize = plcrash_writer_write_thread_register(NULL, regname, regVal);
@@ -829,7 +831,7 @@ static void plcrash_writer_write_thread_frame_symbol_cb (pl_vm_address_t address
  * @param file Output file
  * @param pcval The frame PC value.
  */
-static size_t plcrash_writer_write_thread_frame (plcrash_async_file_t *file, uint64_t pcval, plcrash_async_image_list_t *image_list, plcrash_async_symbol_cache_t *findContext) {
+static size_t plcrash_writer_write_thread_frame (plcrash_async_file_t *file, plcrash_log_writer_t *writer, uint64_t pcval, plcrash_async_image_list_t *image_list, plcrash_async_symbol_cache_t *findContext) {
     size_t rv = 0;
 
     rv += plcrash_writer_pack(file, PLCRASH_PROTO_THREAD_FRAME_PC_ID, PLPROTOBUF_C_TYPE_UINT64, &pcval);
@@ -837,7 +839,7 @@ static size_t plcrash_writer_write_thread_frame (plcrash_async_file_t *file, uin
     plcrash_async_image_list_set_reading(image_list, true);
     plcrash_async_image_t *image = plcrash_async_image_containing_address(image_list, (pl_vm_address_t) pcval);
     
-    if (image != NULL) {
+    if (image != NULL && writer->symbol_strategy != PLCRASH_ASYNC_SYMBOL_STRATEGY_NONE) {
         struct pl_symbol_cb_ctx ctx;
         plcrash_error_t ret;
         
@@ -845,13 +847,13 @@ static size_t plcrash_writer_write_thread_frame (plcrash_async_file_t *file, uin
          * our callback is called and PLCRASH_ESUCCESS is returned. */
         ctx.file = NULL;
         ctx.msgsize = 0x0;
-        ret = plcrash_async_find_symbol(&image->macho_image, findContext, (pl_vm_address_t) pcval, plcrash_writer_write_thread_frame_symbol_cb, &ctx);
+        ret = plcrash_async_find_symbol(&image->macho_image, writer->symbol_strategy, findContext, (pl_vm_address_t) pcval, plcrash_writer_write_thread_frame_symbol_cb, &ctx);
         if (ret == PLCRASH_ESUCCESS) {
             /* Write the header and message */
             rv += plcrash_writer_pack(file, PLCRASH_PROTO_THREAD_FRAME_SYMBOL_ID, PLPROTOBUF_C_TYPE_MESSAGE, &ctx.msgsize);
 
             ctx.file = file;
-            ret = plcrash_async_find_symbol(&image->macho_image, findContext, (pl_vm_address_t) pcval, plcrash_writer_write_thread_frame_symbol_cb, &ctx);
+            ret = plcrash_async_find_symbol(&image->macho_image, writer->symbol_strategy, findContext, (pl_vm_address_t) pcval, plcrash_writer_write_thread_frame_symbol_cb, &ctx);
             if (ret == PLCRASH_ESUCCESS) {
                 rv += ctx.msgsize;
             } else {
@@ -873,18 +875,21 @@ static size_t plcrash_writer_write_thread_frame (plcrash_async_file_t *file, uin
  * Write a thread message
  *
  * @param file Output file
+ * @param task The task in which @a thread is executing.
  * @param thread Thread for which we'll output data.
  * @param thread_number The thread's index number.
- * @param thread_ctx Context to use for stack walking. If NULL, the thread state will be fetched from @a thread. If
+ * @param thread_ctx Thread state to use for stack walking. If NULL, the thread state will be fetched from @a thread. If
  * @a thread is the currently executing thread, <em>must</em> be non-NULL.
  * @param image_list The Mach-O image list.
  * @param findContext Symbol lookup cache.
  * @param crashed If true, mark this as a crashed thread.
  */
 static size_t plcrash_writer_write_thread (plcrash_async_file_t *file,
+                                           plcrash_log_writer_t *writer,
+                                           task_t task,
                                            thread_t thread,
                                            uint32_t thread_number,
-                                           ucontext_t *thread_ctx,
+                                           plcrash_async_thread_state_t *thread_ctx,
                                            plcrash_async_image_list_t *image_list,
                                            plcrash_async_symbol_cache_t *findContext,
                                            bool crashed)
@@ -894,7 +899,7 @@ static size_t plcrash_writer_write_thread (plcrash_async_file_t *file,
     plframe_error_t ferr;
 
     /* A context must be supplied when walking the current thread */
-    PLCF_ASSERT(thread_ctx != NULL || thread != mach_thread_self());
+    PLCF_ASSERT(task != mach_task_self() || thread_ctx != NULL || thread != pl_mach_thread_self());
 
     /* Write the required elements first; fatal errors may occur below, in which case we need to have
      * written out required elements before returning. */
@@ -910,15 +915,18 @@ static size_t plcrash_writer_write_thread (plcrash_async_file_t *file,
     /* Write out the stack frames. */
     {
         /* Set up the frame cursor. */
-        {
-            /* Use the ctx if available */
+        {            
+            /* Use the provided context if available, otherwise initialize a new thread context
+             * from the target thread's state. */
+            plcrash_async_thread_state_t cursor_thr_state;
             if (thread_ctx) {
-                ferr = plframe_cursor_init(&cursor, thread_ctx);
+                cursor_thr_state = *thread_ctx;
             } else {
-                ferr = plframe_cursor_thread_init(&cursor, thread);
+                plcrash_async_thread_state_mach_thread_init(&cursor_thr_state, thread);
             }
 
-            /* Did cursor initialization succeed? If not, it is impossible to proceed */
+            /* Initialize the cursor */
+            ferr = plframe_cursor_init(&cursor, task, &cursor_thr_state, image_list);
             if (ferr != PLFRAME_ESUCCESS) {
                 PLCF_DEBUG("An error occured initializing the frame cursor: %s", plframe_strerror(ferr));
                 return rv;
@@ -929,19 +937,24 @@ static size_t plcrash_writer_write_thread (plcrash_async_file_t *file,
         uint32_t frame_count = 0;
         while ((ferr = plframe_cursor_next(&cursor)) == PLFRAME_ESUCCESS && frame_count < MAX_THREAD_FRAMES) {
             uint32_t frame_size;
+            
+            /* On the first frame, dump registers for the crashed thread */
+            if (frame_count == 0 && crashed) {
+                rv += plcrash_writer_write_thread_registers(file, task, &cursor);
+            }
 
             /* Fetch the PC value */
-            plframe_greg_t pc = 0;
-            if ((ferr = plframe_get_reg(&cursor, PLFRAME_REG_IP, &pc)) != PLFRAME_ESUCCESS) {
+            plcrash_greg_t pc = 0;
+            if ((ferr = plframe_cursor_get_reg(&cursor, PLCRASH_REG_IP, &pc)) != PLFRAME_ESUCCESS) {
                 PLCF_DEBUG("Could not retrieve frame PC register: %s", plframe_strerror(ferr));
                 break;
             }
 
             /* Determine the size */
-            frame_size = plcrash_writer_write_thread_frame(NULL, pc, image_list, findContext);
+            frame_size = plcrash_writer_write_thread_frame(NULL, writer, pc, image_list, findContext);
             
             rv += plcrash_writer_pack(file, PLCRASH_PROTO_THREAD_FRAMES_ID, PLPROTOBUF_C_TYPE_MESSAGE, &frame_size);
-            rv += plcrash_writer_write_thread_frame(file, pc, image_list, findContext);
+            rv += plcrash_writer_write_thread_frame(file, writer, pc, image_list, findContext);
             frame_count++;
         }
 
@@ -953,11 +966,7 @@ static size_t plcrash_writer_write_thread (plcrash_async_file_t *file,
         }
     }
 
-    /* Dump registers for the crashed thread */
-    if (crashed) {
-        rv += plcrash_writer_write_thread_registers(file, cursor.uap);
-    }
-
+    plframe_cursor_free(&cursor);
     return rv;
 }
 
@@ -976,8 +985,8 @@ static size_t plcrash_writer_write_binary_image (plcrash_async_file_t *file, plc
 
     /* Fetch the CPU types. Note that the wire format represents these as 64-bit unsigned integers.
      * We explicitly cast to an equivalently sized unsigned type to prevent improper sign extension. */
-    uint64_t cpu_type = (uint32_t) image->swap32(image->header.cputype);
-    uint64_t cpu_subtype = (uint32_t) image->swap32(image->header.cpusubtype);
+    uint64_t cpu_type = (uint32_t) image->byteorder->swap32(image->header.cputype);
+    uint64_t cpu_subtype = (uint32_t) image->byteorder->swap32(image->header.cpusubtype);
 
     /* Text segment size */
     uint64_t mach_size = image->text_size;
@@ -1041,11 +1050,35 @@ static size_t plcrash_writer_write_exception (plcrash_async_file_t *file, plcras
         uint64_t pc = (uint64_t)(uintptr_t) writer->uncaught_exception.callstack[i];
         
         /* Determine the size */
-        uint32_t frame_size = plcrash_writer_write_thread_frame(NULL, pc, image_list, findContext);
+        uint32_t frame_size = plcrash_writer_write_thread_frame(NULL, writer, pc, image_list, findContext);
         
         rv += plcrash_writer_pack(file, PLCRASH_PROTO_EXCEPTION_FRAMES_ID, PLPROTOBUF_C_TYPE_MESSAGE, &frame_size);
-        rv += plcrash_writer_write_thread_frame(file, pc, image_list, findContext);
+        rv += plcrash_writer_write_thread_frame(file, writer, pc, image_list, findContext);
         frame_count++;
+    }
+
+    return rv;
+}
+
+/**
+ * @internal
+ *
+ * Write the crash signal's mach exception info.
+ *
+ * @param file Output file
+ * @param siginfo The signal information
+ */
+static size_t plcrash_writer_write_mach_signal (plcrash_async_file_t *file, plcrash_log_mach_signal_info_t *siginfo) {
+    size_t rv = 0;
+
+    /* Type */
+    uint64_t type = siginfo->type;
+    rv += plcrash_writer_pack(file, PLCRASH_PROTO_SIGNAL_MACH_EXCEPTION_TYPE_ID, PLPROTOBUF_C_TYPE_UINT64, &type);
+    
+    /* Code(s) */
+    for (mach_msg_type_number_t i = 0; i < siginfo->code_count; i++) {
+        uint64_t code = siginfo->code[i];
+        rv += plcrash_writer_pack(file, PLCRASH_PROTO_SIGNAL_MACH_EXCEPTION_CODES_ID, PLPROTOBUF_C_TYPE_UINT64, &code);
     }
 
     return rv;
@@ -1059,34 +1092,50 @@ static size_t plcrash_writer_write_exception (plcrash_async_file_t *file, plcras
  * @param file Output file
  * @param siginfo The signal information
  */
-static size_t plcrash_writer_write_signal (plcrash_async_file_t *file, siginfo_t *siginfo) {
+static size_t plcrash_writer_write_signal (plcrash_async_file_t *file, plcrash_log_signal_info_t *siginfo) {
     size_t rv = 0;
+    
+    /* BSD signal info is always required in the current report format; this restriction will be lifted
+     * once we switch to the 2.0 format. */
+    PLCF_ASSERT(siginfo->bsd_info != NULL);
     
     /* Fetch the signal name */
     char name_buf[10];
     const char *name;
-    if ((name = plcrash_async_signal_signame(siginfo->si_signo)) == NULL) {
-        PLCF_DEBUG("Warning -- unhandled signal number (signo=%d). This is a bug.", siginfo->si_signo);
-        snprintf(name_buf, sizeof(name_buf), "#%d", siginfo->si_signo);
+    if ((name = plcrash_async_signal_signame(siginfo->bsd_info->signo)) == NULL) {
+        PLCF_DEBUG("Warning -- unhandled signal number (signo=%d). This is a bug.", siginfo->bsd_info->signo);
+        snprintf(name_buf, sizeof(name_buf), "#%d", siginfo->bsd_info->signo);
         name = name_buf;
     }
 
     /* Fetch the signal code string */
     char code_buf[10];
     const char *code;
-    if ((code = plcrash_async_signal_sigcode(siginfo->si_signo, siginfo->si_code)) == NULL) {
-        PLCF_DEBUG("Warning -- unhandled signal sicode (signo=%d, code=%d). This is a bug.", siginfo->si_signo, siginfo->si_code);
-        snprintf(code_buf, sizeof(code_buf), "#%d", siginfo->si_code);
+    if ((code = plcrash_async_signal_sigcode(siginfo->bsd_info->signo, siginfo->bsd_info->code)) == NULL) {
+        PLCF_DEBUG("Warning -- unhandled signal sicode (signo=%d, code=%d). This is a bug.", siginfo->bsd_info->signo, siginfo->bsd_info->code);
+        snprintf(code_buf, sizeof(code_buf), "#%d", siginfo->bsd_info->code);
         code = code_buf;
     }
     
     /* Address value */
-    uint64_t addr = (uintptr_t) siginfo->si_addr;
+    uint64_t addr = (uintptr_t) siginfo->bsd_info->address;
 
     /* Write it out */
     rv += plcrash_writer_pack(file, PLCRASH_PROTO_SIGNAL_NAME_ID, PLPROTOBUF_C_TYPE_STRING, name);
     rv += plcrash_writer_pack(file, PLCRASH_PROTO_SIGNAL_CODE_ID, PLPROTOBUF_C_TYPE_STRING, code);
     rv += plcrash_writer_pack(file, PLCRASH_PROTO_SIGNAL_ADDRESS_ID, PLPROTOBUF_C_TYPE_UINT64, &addr);
+    
+    /* Mach exception info */
+    if (siginfo->mach_info != NULL) {
+        uint32_t size;
+        
+        /* Determine size */
+        size = plcrash_writer_write_mach_signal(NULL, siginfo->mach_info);
+        
+        /* Write message */
+        rv += plcrash_writer_pack(file, PLCRASH_PROTO_SIGNAL_MACH_EXCEPTION_ID, PLPROTOBUF_C_TYPE_MESSAGE, &size);
+        rv += plcrash_writer_write_mach_signal(file, siginfo->mach_info);
+    }
 
     return rv;
 }
@@ -1123,8 +1172,8 @@ static size_t plcrash_writer_write_report_info (plcrash_async_file_t *file, plcr
  * @param image_list The current list of loaded binary images.
  * @param file The output file.
  * @param siginfo Signal information.
- * @param current_context If non-NULL, the context will be used when walking the current thread. The context must remain
- * valid until this function returns. Generally, this context will be generated by a signal handler, or via a
+ * @param current_state If non-NULL, the given thread state will be used when walking the current thread. The state must remain
+ * valid until this function returns. Generally, this state will be generated by a signal handler, or via a
  * context-generating trampoline such as plcrash_log_writer_write_curthread(). If NULL, a thread dump for the current
  * thread will not be written. If @a crashed_thread is the current thread (as returned by mach_thread_self()), this
  * value <em>must</em> be provided.
@@ -1133,15 +1182,15 @@ plcrash_error_t plcrash_log_writer_write (plcrash_log_writer_t *writer,
                                           thread_t crashed_thread,
                                           plcrash_async_image_list_t *image_list,
                                           plcrash_async_file_t *file,
-                                          siginfo_t *siginfo,
-                                          ucontext_t *current_context)
+                                          plcrash_log_signal_info_t *siginfo,
+                                          plcrash_async_thread_state_t *current_state)
 {
     thread_act_array_t threads;
     mach_msg_type_number_t thread_count;
 
     /* A context must be supplied if the current thread is marked as the crashed thread; otherwise,
      * the thread's stack can not be safely walked. */
-    PLCF_ASSERT(mach_thread_self() != crashed_thread || current_context != NULL);
+    PLCF_ASSERT(pl_mach_thread_self() != crashed_thread || current_state != NULL);
 
     /* Get a list of all threads */
     if (task_threads(mach_task_self(), &threads, &thread_count) != KERN_SUCCESS) {
@@ -1151,7 +1200,7 @@ plcrash_error_t plcrash_log_writer_write (plcrash_log_writer_t *writer,
     
     /* Suspend all but the current thread. */
     for (mach_msg_type_number_t i = 0; i < thread_count; i++) {
-        if (threads[i] != mach_thread_self())
+        if (threads[i] != pl_mach_thread_self())
             thread_suspend(threads[i]);
     }
 
@@ -1234,30 +1283,32 @@ plcrash_error_t plcrash_log_writer_write (plcrash_log_writer_t *writer,
         /* Determine size */
         size = plcrash_writer_write_process_info(NULL, writer->process_info.process_name, writer->process_info.process_id, 
                                                  writer->process_info.process_path, writer->process_info.parent_process_name,
-                                                 writer->process_info.parent_process_id, writer->process_info.native);
+                                                 writer->process_info.parent_process_id, writer->process_info.native,
+                                                 writer->process_info.start_time);
         
         /* Write message */
         plcrash_writer_pack(file, PLCRASH_PROTO_PROCESS_INFO_ID, PLPROTOBUF_C_TYPE_MESSAGE, &size);
         plcrash_writer_write_process_info(file, writer->process_info.process_name, writer->process_info.process_id, 
                                           writer->process_info.process_path, writer->process_info.parent_process_name, 
-                                          writer->process_info.parent_process_id, writer->process_info.native);
+                                          writer->process_info.parent_process_id, writer->process_info.native,
+                                          writer->process_info.start_time);
     }
     
     /* Threads */
     uint32_t thread_number = 0;
     for (mach_msg_type_number_t i = 0; i < thread_count; i++) {
         thread_t thread = threads[i];
-        ucontext_t *thr_ctx = NULL;
+        plcrash_async_thread_state_t *thr_ctx = NULL;
         bool crashed = false;
         uint32_t size;
 
         /* If executing on the target thread, we need to a valid context to walk */
-        if (mach_thread_self() == thread) {
+        if (pl_mach_thread_self() == thread) {
             /* Can't log a report for the current thread without a valid context. */
-            if (current_context == NULL)
+            if (current_state == NULL)
                 continue;
         
-            thr_ctx = current_context;
+            thr_ctx = current_state;
         }
         
         /* Check if this is the crashed thread */
@@ -1266,11 +1317,11 @@ plcrash_error_t plcrash_log_writer_write (plcrash_log_writer_t *writer,
         }
 
         /* Determine the size */
-        size = plcrash_writer_write_thread(NULL, thread, thread_number, thr_ctx, image_list, &findContext, crashed);
+        size = plcrash_writer_write_thread(NULL, writer, mach_task_self(), thread, thread_number, thr_ctx, image_list, &findContext, crashed);
 
         /* Write message */
         plcrash_writer_pack(file, PLCRASH_PROTO_THREADS_ID, PLPROTOBUF_C_TYPE_MESSAGE, &size);
-        plcrash_writer_write_thread(file, thread, thread_number, thr_ctx, image_list, &findContext, crashed);
+        plcrash_writer_write_thread(file, writer, mach_task_self(), thread, thread_number, thr_ctx, image_list, &findContext, crashed);
 
         thread_number++;
     }
@@ -1314,7 +1365,7 @@ plcrash_error_t plcrash_log_writer_write (plcrash_log_writer_t *writer,
     
     /* Clean up the thread array */
     for (mach_msg_type_number_t i = 0; i < thread_count; i++) {
-        if (threads[i] != mach_thread_self())
+        if (threads[i] != pl_mach_thread_self())
             thread_resume(threads[i]);
 
         mach_port_deallocate(mach_task_self(), threads[i]);

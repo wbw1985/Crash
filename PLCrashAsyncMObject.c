@@ -58,7 +58,6 @@
  * @return On success, returns PLCRASH_ESUCCESS. On failure, one of the plcrash_error_t error values will be returned, and no
  * mapping will be performed.
  *
- * @warn Callers must call plcrash_async_mobject_free() on @a mobj, even if plcrash_async_mobject_init() fails.
  * @note
  * This code previously used vm_remap() to perform atomic remapping of process memory. However, this appeared
  * to trigger a kernel bug (and resulting panic) on iOS 6.0 through 6.1.2, possibly fixed in 6.1.3. Note that
@@ -205,12 +204,6 @@ static plcrash_error_t plcrash_async_mobject_remap_pages_workaround (mach_port_t
         kt = vm_map(mach_task_self(), &target_address, entry_length, 0x0, VM_FLAGS_FIXED|VM_FLAGS_OVERWRITE, mem_handle, 0x0, TRUE, VM_PROT_READ, VM_PROT_READ, VM_INHERIT_COPY);
 #endif /* !PL_HAVE_MACH_VM */
         
-        /* Drop the memory handle */
-        kt = mach_port_mod_refs(mach_task_self(), mem_handle, MACH_PORT_RIGHT_SEND, -1);
-        if (kt != KERN_SUCCESS) {
-            PLCF_DEBUG("mach_port_mod_refs(-1) failed: %d", kt);
-        }
-        
         if (kt != KERN_SUCCESS) {
             PLCF_DEBUG("vm_map() failure: %d", kt);
 
@@ -219,8 +212,20 @@ static plcrash_error_t plcrash_async_mobject_remap_pages_workaround (mach_port_t
             if (kt != KERN_SUCCESS) {
                 PLCF_DEBUG("vm_deallocate() failed: %d", kt);
             }
+
+            /* Drop the memory handle */
+            kt = mach_port_mod_refs(mach_task_self(), mem_handle, MACH_PORT_RIGHT_SEND, -1);
+            if (kt != KERN_SUCCESS) {
+                PLCF_DEBUG("mach_port_mod_refs(-1) failed: %d", kt);
+            }
             
             return PLCRASH_ENOMEM;
+        }
+
+        /* Drop the memory handle */
+        kt = mach_port_mod_refs(mach_task_self(), mem_handle, MACH_PORT_RIGHT_SEND, -1);
+        if (kt != KERN_SUCCESS) {
+            PLCF_DEBUG("mach_port_mod_refs(-1) failed: %d", kt);
         }
         
         /* Adjust the total mapping size */
@@ -252,9 +257,6 @@ static plcrash_error_t plcrash_async_mobject_remap_pages_workaround (mach_port_t
  */
 plcrash_error_t plcrash_async_mobject_init (plcrash_async_mobject_t *mobj, mach_port_t task, pl_vm_address_t task_addr, pl_vm_size_t length, bool require_full) {
     plcrash_error_t err;
-    
-    /* We must first initialize vm_address to 0x0. We'll check this in _free() to determine whether calling vm_deallocate() is required */
-    mobj->vm_address = 0x0;
 
     /* Perform the page mapping */
     err = plcrash_async_mobject_remap_pages_workaround(task, task_addr, length, require_full, &mobj->vm_address, &mobj->vm_length);
@@ -276,25 +278,67 @@ plcrash_error_t plcrash_async_mobject_init (plcrash_async_mobject_t *mobj, mach_
     
     /* Save the task-relative address */
     mobj->task_address = task_addr;
+    
+    /* Save the task reference */
+    mobj->task = task;
+    mach_port_mod_refs(mach_task_self(), mobj->task, MACH_PORT_RIGHT_SEND, 1);
 
     return PLCRASH_ESUCCESS;
 }
 
+/**
+ * Return the base (target process relative) address for this mapping.
+ *
+ * @param mobj An initialized memory object.
+ */
+pl_vm_address_t plcrash_async_mobject_base_address (plcrash_async_mobject_t *mobj) {
+    return mobj->task_address;
+}
+
+
+/**
+ * Return the length of this mapping.
+ *
+ * @param mobj An initialized memory object.
+ */
+pl_vm_address_t plcrash_async_mobject_length (plcrash_async_mobject_t *mobj) {
+    return mobj->length;
+}
+
+/**
+ * Return a borrowed reference to the backing task for this mapping.
+ *
+ * @param mobj An initialized memory object.
+ */
+task_t plcrash_async_mobject_task (plcrash_async_mobject_t *mobj) {
+    return mobj->task;
+}
 
 /**
  * Verify that @a length bytes starting at local @a address is within @a mobj's mapped range.
  *
  * @param mobj An initialized memory object.
  * @param address An address within the current task's memory space.
- * @param length The number of bytes that should be readable at @a address.
+ * @param offset An offset to be applied to @a address prior to verifying the address range.
+ * @param length The number of bytes that should be readable at @a address + @a offset.
  */
-bool plcrash_async_mobject_verify_local_pointer (plcrash_async_mobject_t *mobj, uintptr_t address, size_t length) {
+bool plcrash_async_mobject_verify_local_pointer (plcrash_async_mobject_t *mobj, uintptr_t address, pl_vm_off_t offset, size_t length) {
+    /* Verify that the offset value won't overrun a native pointer */
+    if (offset > 0 && UINTPTR_MAX - offset < address) {
+        return false;
+    } else if (offset < 0 && (offset * -1) > address) {
+        return false;
+    }
+
+    /* Adjust the address using the verified offset */
+    address += offset;
+
     /* Verify that the address starts within range */
     if (address < mobj->address) {
         // PLCF_DEBUG("Address %" PRIx64 " < base address %" PRIx64 "", (uint64_t) address, (uint64_t) mobj->address);
         return false;
     }
-    
+
     /* Verify that the address value won't overrun */
     if (UINTPTR_MAX - length < address)
         return false;
@@ -313,19 +357,110 @@ bool plcrash_async_mobject_verify_local_pointer (plcrash_async_mobject_t *mobj, 
  * from @a mobj at @a address, and return the pointer from which a @a length read may be performed.
  *
  * @param mobj An initialized memory object.
- * @param address The address to be read. This address should be relative to the target task's address space.
+ * @param address The base address to be read. This address should be relative to the target task's address space.
+ * @param offset An offset to be applied to @a address prior to verifying the address range.
  * @param length The total number of bytes that should be readable at @a address.
  *
  * @return Returns the validated pointer, or NULL if the requested bytes are not within @a mobj's range.
  */
-void *plcrash_async_mobject_remap_address (plcrash_async_mobject_t *mobj, pl_vm_address_t address, size_t length) {
+void *plcrash_async_mobject_remap_address (plcrash_async_mobject_t *mobj, pl_vm_address_t address, pl_vm_off_t offset, size_t length) {
     /* Map into our memory space */
     pl_vm_address_t remapped = address - mobj->vm_slide;
-    
-    if (!plcrash_async_mobject_verify_local_pointer(mobj, (uintptr_t) remapped, length))
+
+    if (!plcrash_async_mobject_verify_local_pointer(mobj, (uintptr_t) remapped, offset, length))
         return NULL;
 
-    return (void *) remapped;
+    return (void *) remapped + offset;
+}
+
+/**
+ * Read a single byte from @a mobj.
+ *
+ * @param mobj Memory object from which to read the value.
+ * @param address The base address to be read. This address should be relative to the target task's address space.
+ * @param offset An offset to be applied to @a address.
+ * @param result The destination to which the data will be written.
+ *
+ * @return Returns PLCRASH_ESUCCESS on success, PLCRASH_EINVAL if the target address does not fall within the @a mobj address
+ * range, or one of the plcrash_error_t constants for other error conditions.
+ */
+plcrash_error_t plcrash_async_mobject_read_uint8 (plcrash_async_mobject_t *mobj, pl_vm_address_t address, pl_vm_off_t offset, uint8_t *result) {
+    uint8_t *input = plcrash_async_mobject_remap_address(mobj, address, offset, sizeof(uint8_t));
+    if (input == NULL)
+        return PLCRASH_EINVAL;
+    
+    *result = *input;
+    return PLCRASH_ESUCCESS;
+}
+
+/**
+ * Read a 16-bit value from @a mobj.
+ *
+ * @param mobj Memory object from which to read the value.
+ * @param byteorder Byte order of the target value.
+ * @param address The base address to be read. This address should be relative to the target task's address space.
+ * @param offset An offset to be applied to @a address.
+ * @param result The destination to which the data will be written, after @a byteorder has been applied.
+ *
+ * @return Returns PLCRASH_ESUCCESS on success, PLCRASH_EINVAL if the target address does not fall within the @a mobj address
+ * range, or one of the plcrash_error_t constants for other error conditions.
+ */
+plcrash_error_t plcrash_async_mobject_read_uint16 (plcrash_async_mobject_t *mobj, const plcrash_async_byteorder_t *byteorder,
+                                                   pl_vm_address_t address, pl_vm_off_t offset, uint16_t *result)
+{
+    uint16_t *input = plcrash_async_mobject_remap_address(mobj, address, offset, sizeof(uint16_t));
+    if (input == NULL)
+        return PLCRASH_EINVAL;
+    
+    *result = byteorder->swap16(*input);
+    return PLCRASH_ESUCCESS;
+}
+
+
+/**
+ * Read a 32-bit value from @a mobj.
+ *
+ * @param mobj Memory object from which to read the value.
+ * @param byteorder Byte order of the target value.
+ * @param address The base address to be read. This address should be relative to the target task's address space.
+ * @param offset An offset to be applied to @a address.
+ * @param result The destination to which the data will be written, after @a byteorder has been applied.
+ *
+ * @return Returns PLCRASH_ESUCCESS on success, PLCRASH_EINVAL if the target address does not fall within the @a mobj address
+ * range, or one of the plcrash_error_t constants for other error conditions.
+ */
+plcrash_error_t plcrash_async_mobject_read_uint32 (plcrash_async_mobject_t *mobj, const plcrash_async_byteorder_t *byteorder,
+                                                   pl_vm_address_t address, pl_vm_off_t offset, uint32_t *result)
+{
+    uint32_t *input = plcrash_async_mobject_remap_address(mobj, address, offset, sizeof(uint32_t));
+    if (input == NULL)
+        return PLCRASH_EINVAL;
+    
+    *result = byteorder->swap32(*input);
+    return PLCRASH_ESUCCESS;
+}
+
+/**
+ * Read a 64-bit value from @a mobj.
+ *
+ * @param mobj Memory object from which to read the value.
+ * @param byteorder Byte order of the target value.
+ * @param address The base address to be read. This address should be relative to the target task's address space.
+ * @param offset An offset to be applied to @a address.
+ * @param result The destination to which the data will be written, after @a byteorder has been applied.
+ *
+ * @return Returns PLCRASH_ESUCCESS on success, PLCRASH_EINVAL if the target address does not fall within the @a mobj address
+ * range, or one of the plcrash_error_t constants for other error conditions.
+ */
+plcrash_error_t plcrash_async_mobject_read_uint64 (plcrash_async_mobject_t *mobj, const plcrash_async_byteorder_t *byteorder,
+                                                   pl_vm_address_t address, pl_vm_off_t offset, uint64_t *result)
+{
+    uint64_t *input = plcrash_async_mobject_remap_address(mobj, address, offset, sizeof(uint64_t));
+    if (input == NULL)
+        return PLCRASH_EINVAL;
+    
+    *result = byteorder->swap64(*input);
+    return PLCRASH_ESUCCESS;
 }
 
 /**
@@ -334,12 +469,19 @@ void *plcrash_async_mobject_remap_address (plcrash_async_mobject_t *mobj, pl_vm_
  * @note Unlike most free() functions in this API, this function is async-safe.
  */
 void plcrash_async_mobject_free (plcrash_async_mobject_t *mobj) {
-    if (mobj->vm_address == 0x0)
-        return;
-    
     kern_return_t kt;
-    if ((kt = vm_deallocate(mach_task_self(), mobj->vm_address, mobj->vm_length)) != KERN_SUCCESS)
+    
+#ifdef PL_HAVE_MACH_VM
+    kt = mach_vm_deallocate(mach_task_self(), mobj->vm_address, mobj->vm_length);
+#else
+    kt = vm_deallocate(mach_task_self(), mobj->vm_address, mobj->vm_length);
+#endif
+    
+    if (kt != KERN_SUCCESS)
         PLCF_DEBUG("vm_deallocate() failure: %d", kt);
+
+    /* Decrement our task refcount */
+    mach_port_mod_refs(mach_task_self(), mobj->task, MACH_PORT_RIGHT_SEND, -1);
 }
 
 /**

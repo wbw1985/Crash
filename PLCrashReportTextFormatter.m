@@ -29,20 +29,10 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#import "CrashReporter.h"
+#import "CrashReporter/CrashReporter.h"
 
 #import "PLCrashReportTextFormatter.h"
-
-/*
- * XXX: The ARM_V7S Mach-O CPU subtype is not defined in the Mac OS X 10.8
- * headers.
- */
-#ifndef CPU_SUBTYPE_ARM_V7S
-# define CPU_SUBTYPE_ARM_V7S 11
-#elif !TARGET_OS_IPHONE
-# error CPU_SUBTYPE_ARM_V7S is now defined by the SDK. Please remove this define.
-#endif
-
+#import "PLCrashCompatConstants.h"
 
 @interface PLCrashReportTextFormatter (PrivateAPI)
 NSInteger binaryImageSort(id binary1, id binary2, void *context);
@@ -109,6 +99,11 @@ NSInteger binaryImageSort(id binary1, id binary2, void *context);
                     codeType = @"ARM";
                     lp64 = false;
                     break;
+                    
+                case CPU_TYPE_ARM64:
+                    codeType = @"ARM-64";
+                    lp64 = true;
+                    break;
 
                 case CPU_TYPE_X86:
                     codeType = @"X86";
@@ -163,99 +158,96 @@ NSInteger binaryImageSort(id binary1, id binary2, void *context);
         }
     }
 
-//    {
-//        NSString *hardwareModel = @"???";
-//        if (report.hasMachineInfo && report.machineInfo.modelName != nil)
-//            hardwareModel = report.machineInfo.modelName;
-//
-//        NSString *incidentIdentifier = @"???";
-//        if (report.uuidRef != NULL) {
-//            incidentIdentifier = (NSString *) CFUUIDCreateString(NULL, report.uuidRef);
-//            [incidentIdentifier autorelease];
-//        }
-//    
-//        [text appendFormat: @"Incident Identifier: %@\n", incidentIdentifier];
-//        [text appendFormat: @"CrashReporter Key:   TODO\n"];
-//        [text appendFormat: @"Hardware Model:      %@\n", hardwareModel];
-//    }
+    {
+        NSString *hardwareModel = @"???";
+        if (report.hasMachineInfo && report.machineInfo.modelName != nil)
+            hardwareModel = report.machineInfo.modelName;
+
+        NSString *incidentIdentifier = @"???";
+        if (report.uuidRef != NULL) {
+            incidentIdentifier = (NSString *) CFUUIDCreateString(NULL, report.uuidRef);
+            [incidentIdentifier autorelease];
+        }
     
-//    /* Application and process info */
-//    {
-//        NSString *unknownString = @"???";
-//        
-//        NSString *processName = unknownString;
-//        NSString *processId = unknownString;
-//        NSString *processPath = unknownString;
-//        NSString *parentProcessName = unknownString;
-//        NSString *parentProcessId = unknownString;
-//        
-//        /* Process information was not available in earlier crash report versions */
-//        if (report.hasProcessInfo) {
-//            /* Process Name */
-//            if (report.processInfo.processName != nil)
-//                processName = report.processInfo.processName;
-//            
-//            /* PID */
-//            processId = [[NSNumber numberWithUnsignedInteger: report.processInfo.processID] stringValue];
-//            
-//            /* Process Path */
-//            if (report.processInfo.processPath != nil)
-//                processPath = report.processInfo.processPath;
-//            
-//            /* Parent Process Name */
-//            if (report.processInfo.parentProcessName != nil)
-//                parentProcessName = report.processInfo.parentProcessName;
-//            
-//            /* Parent Process ID */
-//            parentProcessId = [[NSNumber numberWithUnsignedInteger: report.processInfo.parentProcessID] stringValue];
-//        }
-//        
-//        [text appendFormat: @"Process:         %@ [%@]\n", processName, processId];
-//        [text appendFormat: @"Path:            %@\n", processPath];
-//        [text appendFormat: @"Identifier:      %@\n", report.applicationInfo.applicationIdentifier];
-//        [text appendFormat: @"Version:         %@\n", report.applicationInfo.applicationVersion];
-//        [text appendFormat: @"Code Type:       %@\n", codeType];
-//        [text appendFormat: @"Parent Process:  %@ [%@]\n", parentProcessName, parentProcessId];
-//    }
-//    
-//    [text appendString: @"\n"];
-//    
-//    /* System info */
-//    {
-//        NSString *osBuild = @"???";
-//        if (report.systemInfo.operatingSystemBuild != nil)
-//            osBuild = report.systemInfo.operatingSystemBuild;
-//        
-//        [text appendFormat: @"Date/Time:       %@\n", report.systemInfo.timestamp];
-//        [text appendFormat: @"OS Version:      %@ %@ (%@)\n", osName, report.systemInfo.operatingSystemVersion, osBuild];
-//        [text appendFormat: @"Report Version:  104\n"];        
-//    }
-//
-//    [text appendString: @"\n"];
-//
-//    /* Exception code */
-//    [text appendFormat: @"Exception Type:  %@\n", report.signalInfo.name];
-//    [text appendFormat: @"Exception Codes: %@ at 0x%" PRIx64 "\n", report.signalInfo.code, report.signalInfo.address];
-//    
-//    for (PLCrashReportThreadInfo *thread in report.threads) {
-//        if (thread.crashed) {
-//            [text appendFormat: @"Crashed Thread:  %ld\n", (long) thread.threadNumber];
-//            break;
-//        }
-//    }
-//    
-//    [text appendString: @"\n"];
+        [text appendFormat: @"Incident Identifier: %@\n", incidentIdentifier];
+        [text appendFormat: @"CrashReporter Key:   TODO\n"];
+        [text appendFormat: @"Hardware Model:      %@\n", hardwareModel];
+    }
+    
+    /* Application and process info */
+    {
+        NSString *unknownString = @"???";
+        
+        NSString *processName = unknownString;
+        NSString *processId = unknownString;
+        NSString *processPath = unknownString;
+        NSString *parentProcessName = unknownString;
+        NSString *parentProcessId = unknownString;
+        
+        /* Process information was not available in earlier crash report versions */
+        if (report.hasProcessInfo) {
+            /* Process Name */
+            if (report.processInfo.processName != nil)
+                processName = report.processInfo.processName;
+            
+            /* PID */
+            processId = [[NSNumber numberWithUnsignedInteger: report.processInfo.processID] stringValue];
+            
+            /* Process Path */
+            if (report.processInfo.processPath != nil)
+                processPath = report.processInfo.processPath;
+            
+            /* Parent Process Name */
+            if (report.processInfo.parentProcessName != nil)
+                parentProcessName = report.processInfo.parentProcessName;
+            
+            /* Parent Process ID */
+            parentProcessId = [[NSNumber numberWithUnsignedInteger: report.processInfo.parentProcessID] stringValue];
+        }
+        
+        [text appendFormat: @"Process:         %@ [%@]\n", processName, processId];
+        [text appendFormat: @"Path:            %@\n", processPath];
+        [text appendFormat: @"Identifier:      %@\n", report.applicationInfo.applicationIdentifier];
+        [text appendFormat: @"Version:         %@\n", report.applicationInfo.applicationVersion];
+        [text appendFormat: @"Code Type:       %@\n", codeType];
+        [text appendFormat: @"Parent Process:  %@ [%@]\n", parentProcessName, parentProcessId];
+    }
+    
+    [text appendString: @"\n"];
+    
+    /* System info */
+    {
+        NSString *osBuild = @"???";
+        if (report.systemInfo.operatingSystemBuild != nil)
+            osBuild = report.systemInfo.operatingSystemBuild;
+        
+        [text appendFormat: @"Date/Time:       %@\n", report.systemInfo.timestamp];
+        [text appendFormat: @"OS Version:      %@ %@ (%@)\n", osName, report.systemInfo.operatingSystemVersion, osBuild];
+        [text appendFormat: @"Report Version:  104\n"];        
+    }
+
+    [text appendString: @"\n"];
+
+    /* Exception code */
+    [text appendFormat: @"Exception Type:  %@\n", report.signalInfo.name];
+    [text appendFormat: @"Exception Codes: %@ at 0x%" PRIx64 "\n", report.signalInfo.code, report.signalInfo.address];
+    
+    for (PLCrashReportThreadInfo *thread in report.threads) {
+        if (thread.crashed) {
+            [text appendFormat: @"Crashed Thread:  %ld\n", (long) thread.threadNumber];
+            break;
+        }
+    }
+    
+    [text appendString: @"\n"];
     
     /* Uncaught Exception */
-    
     if (report.hasExceptionInfo) {
-        [text appendString:@"Hi \n"];
-        [text appendString:@"使用app时发生了崩溃, 详细错误信息如下:\n"];
-        [text appendFormat: @"*** Terminating app due to uncaught exception '%@', reason: '%@'",
+        [text appendFormat: @"Application Specific Information:\n"];
+        [text appendFormat: @"*** Terminating app due to uncaught exception '%@', reason: '%@'\n",
                 report.exceptionInfo.exceptionName, report.exceptionInfo.exceptionReason];
         
-        [text appendString:@"\n\n"];
-        [text appendString:@"详细错误信息:\n ( \n"];
+        [text appendString: @"\n"];
     }
 
     /* If an exception stack trace is available, output an Apple-compatible backtrace. */
@@ -263,7 +255,7 @@ NSInteger binaryImageSort(id binary1, id binary2, void *context);
         PLCrashReportExceptionInfo *exception = report.exceptionInfo;
         
         /* Create the header. */
-//        [text appendString: @"Last Exception Backtrace:\n"];
+        [text appendString: @"Last Exception Backtrace:\n"];
 
         /* Write out the frames. In raw reports, Apple writes this out as a simple list of PCs. In the minimally
          * post-processed report, Apple writes this out as full frame entries. We use the latter format. */
@@ -271,145 +263,161 @@ NSInteger binaryImageSort(id binary1, id binary2, void *context);
             PLCrashReportStackFrameInfo *frameInfo = [exception.stackFrames objectAtIndex: frame_idx];
             [text appendString: [self formatStackFrame: frameInfo frameIndex: frame_idx report: report lp64: lp64]];
         }
-        [text appendString:@") \n"];
         [text appendString: @"\n"];
     }
 
-//    /* Threads */
-//    PLCrashReportThreadInfo *crashed_thread = nil;
-//    NSInteger maxThreadNum = 0;
-//    for (PLCrashReportThreadInfo *thread in report.threads) {
-//        if (thread.crashed) {
-//            [text appendFormat: @"Thread %ld Crashed:\n", (long) thread.threadNumber];
-//            crashed_thread = thread;
-//        } else {
-//            [text appendFormat: @"Thread %ld:\n", (long) thread.threadNumber];
-//        }
-//        for (NSUInteger frame_idx = 0; frame_idx < [thread.stackFrames count]; frame_idx++) {
-//            PLCrashReportStackFrameInfo *frameInfo = [thread.stackFrames objectAtIndex: frame_idx];
-//            [text appendString: [self formatStackFrame: frameInfo frameIndex: frame_idx report: report lp64: lp64]];
-//        }
-//        [text appendString: @"\n"];
-//
-//        /* Track the highest thread number */
-//        maxThreadNum = MAX(maxThreadNum, thread.threadNumber);
-//    }
+    /* Threads */
+    PLCrashReportThreadInfo *crashed_thread = nil;
+    NSInteger maxThreadNum = 0;
+    for (PLCrashReportThreadInfo *thread in report.threads) {
+        if (thread.crashed) {
+            [text appendFormat: @"Thread %ld Crashed:\n", (long) thread.threadNumber];
+            crashed_thread = thread;
+        } else {
+            [text appendFormat: @"Thread %ld:\n", (long) thread.threadNumber];
+        }
+        for (NSUInteger frame_idx = 0; frame_idx < [thread.stackFrames count]; frame_idx++) {
+            PLCrashReportStackFrameInfo *frameInfo = [thread.stackFrames objectAtIndex: frame_idx];
+            [text appendString: [self formatStackFrame: frameInfo frameIndex: frame_idx report: report lp64: lp64]];
+        }
+        [text appendString: @"\n"];
 
-//    /* Registers */
-//    if (crashed_thread != nil) {
-//        [text appendFormat: @"Thread %ld crashed with %@ Thread State:\n", (long) crashed_thread.threadNumber, codeType];
-//        
-//        int regColumn = 0;
-//        for (PLCrashReportRegisterInfo *reg in crashed_thread.registers) {
-//            NSString *reg_fmt;
-//            
-//            /* Use 32-bit or 64-bit fixed width format for the register values */
-//            if (lp64)
-//                reg_fmt = @"%6s: 0x%016" PRIx64 " ";
-//            else
-//                reg_fmt = @"%6s: 0x%08" PRIx64 " ";
-//            
-//            /* Remap register names to match Apple's crash reports */
-//            NSString *regName = reg.registerName;
-//            if (report.machineInfo != nil && report.machineInfo.processorInfo.typeEncoding == PLCrashReportProcessorTypeEncodingMach) {
-//                PLCrashReportProcessorInfo *pinfo = report.machineInfo.processorInfo;
-//                cpu_type_t arch_type = pinfo.type & ~CPU_ARCH_MASK;
-//
-//                /* Apple uses 'ip' rather than 'r12' on ARM */
-//                if (arch_type == CPU_TYPE_ARM && [regName isEqual: @"r12"]) {
-//                    regName = @"ip";
-//                }
-//            }
-//            [text appendFormat: reg_fmt, [regName UTF8String], reg.registerValue];
-//
-//            regColumn++;
-//            if (regColumn == 4) {
-//                [text appendString: @"\n"];
-//                regColumn = 0;
-//            }
-//        }
-//        
-//        if (regColumn != 0)
-//            [text appendString: @"\n"];
-//        
-//        [text appendString: @"\n"];
-//    }
+        /* Track the highest thread number */
+        maxThreadNum = MAX(maxThreadNum, thread.threadNumber);
+    }
+
+    /* Registers */
+    if (crashed_thread != nil) {
+        [text appendFormat: @"Thread %ld crashed with %@ Thread State:\n", (long) crashed_thread.threadNumber, codeType];
+        
+        int regColumn = 0;
+        for (PLCrashReportRegisterInfo *reg in crashed_thread.registers) {
+            NSString *reg_fmt;
+            
+            /* Use 32-bit or 64-bit fixed width format for the register values */
+            if (lp64)
+                reg_fmt = @"%6s: 0x%016" PRIx64 " ";
+            else
+                reg_fmt = @"%6s: 0x%08" PRIx64 " ";
+            
+            /* Remap register names to match Apple's crash reports */
+            NSString *regName = reg.registerName;
+            if (report.machineInfo != nil && report.machineInfo.processorInfo.typeEncoding == PLCrashReportProcessorTypeEncodingMach) {
+                PLCrashReportProcessorInfo *pinfo = report.machineInfo.processorInfo;
+                cpu_type_t arch_type = pinfo.type & ~CPU_ARCH_MASK;
+
+                /* Apple uses 'ip' rather than 'r12' on ARM */
+                if (arch_type == CPU_TYPE_ARM && [regName isEqual: @"r12"]) {
+                    regName = @"ip";
+                }
+            }
+            [text appendFormat: reg_fmt, [regName UTF8String], reg.registerValue];
+
+            regColumn++;
+            if (regColumn == 4) {
+                [text appendString: @"\n"];
+                regColumn = 0;
+            }
+        }
+        
+        if (regColumn != 0)
+            [text appendString: @"\n"];
+        
+        [text appendString: @"\n"];
+    }
     
     /* Images. The iPhone crash report format sorts these in ascending order, by the base address */
-//    [text appendString: @"Binary Images:\n"];
-//    for (PLCrashReportBinaryImageInfo *imageInfo in [report.images sortedArrayUsingFunction: binaryImageSort context: nil]) {
-//        NSString *uuid;
-//        /* Fetch the UUID if it exists */
-//        if (imageInfo.hasImageUUID)
-//            uuid = imageInfo.imageUUID;
-//        else
-//            uuid = @"???";
-//        
-//        /* Determine the architecture string */
-//        NSString *archName = @"???";
-//        if (imageInfo.codeType != nil && imageInfo.codeType.typeEncoding == PLCrashReportProcessorTypeEncodingMach) {
-//            switch (imageInfo.codeType.type) {
-//                case CPU_TYPE_ARM:
-//                    /* Apple includes subtype for ARM binaries. */
-//                    switch (imageInfo.codeType.subtype) {
-//                        case CPU_SUBTYPE_ARM_V6:
-//                            archName = @"armv6";
-//                            break;
-//
-//                        case CPU_SUBTYPE_ARM_V7:
-//                            archName = @"armv7";
-//                            break;
-//                            
-//                        case CPU_SUBTYPE_ARM_V7S:
-//                            archName = @"armv7s";
-//                            break;
-//
-//                        default:
-//                            archName = @"arm-unknown";
-//                            break;
-//                    }
-//                    break;
-//                    
-//                case CPU_TYPE_X86:
-//                    archName = @"i386";
-//                    break;
-//                    
-//                case CPU_TYPE_X86_64:
-//                    archName = @"x86_64";
-//                    break;
-//
-//                case CPU_TYPE_POWERPC:
-//                    archName = @"powerpc";
-//                    break;
-//
-//                default:
-//                    // Use the default archName value (initialized above).
-//                    break;
-//            }
-//        }
-//
-//        /* Determine if this is the main executable */
-//        NSString *binaryDesignator = @" ";
-//        if ([imageInfo.imageName isEqual: report.processInfo.processPath])
-//            binaryDesignator = @"+";
-//        
-//        /* base_address - terminating_address [designator]file_name arch <uuid> file_path */
-//        NSString *fmt = nil;
-//        if (lp64) {
-//            fmt = @"%18#" PRIx64 " - %18#" PRIx64 " %@%@ %@  <%@> %@\n";
-//        } else {
-//            fmt = @"%10#" PRIx64 " - %10#" PRIx64 " %@%@ %@  <%@> %@\n";
-//        }
-//
-//        [text appendFormat: fmt,
-//                            imageInfo.imageBaseAddress,
-//                            imageInfo.imageBaseAddress + (MAX(1, imageInfo.imageSize) - 1), // The Apple format uses an inclusive range
-//                            binaryDesignator,
-//                            [imageInfo.imageName lastPathComponent],
-//                            archName,
-//                            uuid,
-//                            imageInfo.imageName];
-//    }
+    [text appendString: @"Binary Images:\n"];
+    for (PLCrashReportBinaryImageInfo *imageInfo in [report.images sortedArrayUsingFunction: binaryImageSort context: nil]) {
+        NSString *uuid;
+        /* Fetch the UUID if it exists */
+        if (imageInfo.hasImageUUID)
+            uuid = imageInfo.imageUUID;
+        else
+            uuid = @"???";
+        
+        /* Determine the architecture string */
+        NSString *archName = @"???";
+        if (imageInfo.codeType != nil && imageInfo.codeType.typeEncoding == PLCrashReportProcessorTypeEncodingMach) {
+            switch (imageInfo.codeType.type) {
+                case CPU_TYPE_ARM:
+                    /* Apple includes subtype for ARM binaries. */
+                    switch (imageInfo.codeType.subtype) {
+                        case CPU_SUBTYPE_ARM_V6:
+                            archName = @"armv6";
+                            break;
+
+                        case CPU_SUBTYPE_ARM_V7:
+                            archName = @"armv7";
+                            break;
+                            
+                        case CPU_SUBTYPE_ARM_V7S:
+                            archName = @"armv7s";
+                            break;
+
+                        default:
+                            archName = @"arm-unknown";
+                            break;
+                    }
+                    break;
+                    
+                case CPU_TYPE_ARM64:
+                    /* Apple includes subtype for ARM64 binaries. */
+                    switch (imageInfo.codeType.subtype) {
+                        case CPU_SUBTYPE_ARM_ALL:
+                            archName = @"arm64";
+                            break;
+
+                        case CPU_SUBTYPE_ARM_V8:
+                            archName = @"armv8";
+                            break;
+
+                        default:
+                            archName = @"arm64-unknown";
+                            break;
+                    }
+                    break;
+                    
+                case CPU_TYPE_X86:
+                    archName = @"i386";
+                    break;
+                    
+                case CPU_TYPE_X86_64:
+                    archName = @"x86_64";
+                    break;
+
+                case CPU_TYPE_POWERPC:
+                    archName = @"powerpc";
+                    break;
+
+                default:
+                    // Use the default archName value (initialized above).
+                    break;
+            }
+        }
+
+        /* Determine if this is the main executable */
+        NSString *binaryDesignator = @" ";
+        if ([imageInfo.imageName isEqual: report.processInfo.processPath])
+            binaryDesignator = @"+";
+        
+        /* base_address - terminating_address [designator]file_name arch <uuid> file_path */
+        NSString *fmt = nil;
+        if (lp64) {
+            fmt = @"%18#" PRIx64 " - %18#" PRIx64 " %@%@ %@  <%@> %@\n";
+        } else {
+            fmt = @"%10#" PRIx64 " - %10#" PRIx64 " %@%@ %@  <%@> %@\n";
+        }
+
+        [text appendFormat: fmt,
+                            imageInfo.imageBaseAddress,
+                            imageInfo.imageBaseAddress + (MAX(1, imageInfo.imageSize) - 1), // The Apple format uses an inclusive range
+                            binaryDesignator,
+                            [imageInfo.imageName lastPathComponent],
+                            archName,
+                            uuid,
+                            imageInfo.imageName];
+    }
     
 
     return text;
