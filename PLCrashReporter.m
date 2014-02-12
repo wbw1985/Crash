@@ -40,6 +40,9 @@
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
 
+#import "BaiduMobStatLogManager.h"
+#import "BaiduMobStatConfig.h"
+
 #define NSDEBUG(msg, args...) {\
     NSLog(@"[PLCrashReporter] " msg, ## args); \
 }
@@ -182,7 +185,7 @@ static void image_remove_callback (const struct mach_header *mh, intptr_t vmaddr
 static void uncaught_exception_handler (NSException *exception) {
     /* Set the uncaught exception */
     plcrash_log_writer_set_exception(&signal_handler_context.writer, exception);
-
+    
     /* Synchronously trigger the crash handler */
     abort();
 }
