@@ -50,6 +50,11 @@
 
 #import "PLCrashSysctl.h"
 
+#import "BaiduMobStatConfig.h"
+#import "BaiduMobStatLogManager.h"
+#import "PLCrashReporter.h"
+#import "PLCrashReportTextFormatter.h"
+
 #if TARGET_OS_IPHONE
 #import <UIKit/UIKit.h> // For UIDevice
 #endif
@@ -466,7 +471,41 @@ void plcrash_log_writer_set_exception (plcrash_log_writer_t *writer, NSException
             i++;
         }
     }
-
+     NSLog(@"<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<");
+     NSLog(@"uncaught_exception.name:%s ", writer->uncaught_exception.name);
+     NSLog(@"uncaught_exception.reason:%s ", writer->uncaught_exception.reason);
+     NSLog(@">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
+//    NSError *error = NULL;
+//    NSData* _crashData = [[NSData alloc] initWithData:[[PLCrashReporter sharedReporter] loadPendingCrashReportDataAndReturnError: &error]];
+//    
+//    
+//    PLCrashReport *report = [[[PLCrashReport alloc] initWithData:_crashData error:&error] autorelease];
+//    
+//    if (report == nil) {
+//        NSLog(@"Could not parse crash report");
+//        return;
+//    }
+//    
+//    if (_crashData == nil) {
+//        NSLog(@"Could not load crash report: %@", error);
+//    } else {
+//        NSString *crashLogStringRaw = [PLCrashReportTextFormatter stringValueForCrashReport:report withTextFormat:PLCrashReportTextFormatiOS];
+//        
+//        NSArray *crashLogStringArray =  [crashLogStringRaw componentsSeparatedByString:@"Binary Images:"];
+//        
+//        NSString *crashLogString = crashLogStringArray[0];
+//        
+//        @autoreleasepool {
+//            
+//            NSDictionary* ex = [NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithDouble:DoubleTimeStamp],@"t", crashLogString, @"c", nil];
+//            [[BaiduMobStatLogManager sharedManager] putException:ex];
+//            
+//        }
+//        
+//        NSLog(@"stringData:%@ ", crashLogString);
+//        [[PLCrashReporter sharedReporter] purgePendingCrashReport];
+//    }
+    
     /* Ensure that any signal handler has a consistent view of the above initialization. */
     OSMemoryBarrier();
 }

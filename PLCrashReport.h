@@ -28,18 +28,18 @@
 
 #import <Foundation/Foundation.h>
 
-//#import "PLCrashReportApplicationInfo.h"
+#import "PLCrashReportApplicationInfo.h"
 #import "PLCrashReportBinaryImageInfo.h"
 #import "PLCrashReportExceptionInfo.h"
-//#import "PLCrashReportMachineInfo.h"
-//#import "PLCrashReportProcessInfo.h"
+#import "PLCrashReportMachineInfo.h"
+#import "PLCrashReportProcessInfo.h"
 #import "PLCrashReportProcessorInfo.h"
-//#import "PLCrashReportRegisterInfo.h"
+#import "PLCrashReportRegisterInfo.h"
 #import "PLCrashReportSignalInfo.h"
 #import "PLCrashReportStackFrameInfo.h"
 #import "PLCrashReportSymbolInfo.h"
 #import "PLCrashReportSystemInfo.h"
-//#import "PLCrashReportThreadInfo.h"
+#import "PLCrashReportThreadInfo.h"
 
 /** 
  * @ingroup constants
@@ -88,19 +88,19 @@ typedef struct _PLCrashReportDecoder _PLCrashReportDecoder;
     PLCrashReportSystemInfo *_systemInfo;
     
     /** Machine info */
-//    PLCrashReportMachineInfo *_machineInfo;
+    PLCrashReportMachineInfo *_machineInfo;
 
     /** Application info */
-//    PLCrashReportApplicationInfo *_applicationInfo;
+    PLCrashReportApplicationInfo *_applicationInfo;
     
     /** Process info */
-//    PLCrashReportProcessInfo *_processInfo;
+    PLCrashReportProcessInfo *_processInfo;
 
     /** Signal info */
     PLCrashReportSignalInfo *_signalInfo;
 
     /** Thread info (PLCrashReportThreadInfo instances) */
-//    NSArray *_threads;
+    NSArray *_threads;
 
     /** Binary images (PLCrashReportBinaryImageInfo instances */
     NSArray *_images;
@@ -124,29 +124,29 @@ typedef struct _PLCrashReportDecoder _PLCrashReportDecoder;
 /**
  * YES if machine information is available.
  */
-//@property(nonatomic, readonly) BOOL hasMachineInfo;
+@property(nonatomic, readonly) BOOL hasMachineInfo;
 
 /**
  * Machine information. Only available in later (v1.1+) crash report format versions. If not available,
  * will be nil.
  */
-//@property(nonatomic, readonly) PLCrashReportMachineInfo *machineInfo;
+@property(nonatomic, readonly) PLCrashReportMachineInfo *machineInfo;
 
 /**
  * Application information.
  */
-//@property(nonatomic, readonly) PLCrashReportApplicationInfo *applicationInfo;
+@property(nonatomic, readonly) PLCrashReportApplicationInfo *applicationInfo;
 
 /**
  * YES if process information is available.
  */
-//@property(nonatomic, readonly) BOOL hasProcessInfo;
+@property(nonatomic, readonly) BOOL hasProcessInfo;
 
 /**
  * Process information. Only available in later (v1.1+) crash report format versions. If not available,
  * will be nil.
  */
-//@property(nonatomic, readonly) PLCrashReportProcessInfo *processInfo;
+@property(nonatomic, readonly) PLCrashReportProcessInfo *processInfo;
 
 /**
  * Signal information. This provides the signal and signal code of the fatal signal.
@@ -156,7 +156,7 @@ typedef struct _PLCrashReportDecoder _PLCrashReportDecoder;
 /**
  * Thread information. Returns a list of PLCrashReportThreadInfo instances.
  */
-//@property(nonatomic, readonly) NSArray *threads;
+@property(nonatomic, readonly) NSArray *threads;
 
 /**
  * Binary image information. Returns a list of PLCrashReportBinaryImageInfo instances.
