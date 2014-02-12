@@ -26,40 +26,41 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#import <Foundation/Foundation.h>
-#import "PLCrashReportThreadInfo.h"
+#import "PLCrashReportApplicationInfo.h"
 
+/**
+ * Crash log application data.
+ *
+ * Provides the application identifier and version of the crashed
+ * application.
+ */
+@implementation PLCrashReportApplicationInfo
 
-@interface PLCrashReportExceptionInfo : NSObject {
-@private
-    /** Name */
-    NSString *_name;
+/**
+ * Initialize with the provided application identifier and version.
+ *
+ * @param applicationIdentifier Application identifier. This is usually the CFBundleIdentifier value.
+ * @param applicationVersion Application version. This is usually the CFBundleVersion value.
+ */
+- (id) initWithApplicationIdentifier: (NSString *) applicationIdentifier 
+                  applicationVersion: (NSString *) applicationVersion
+{
+    if ((self = [super init]) == nil)
+        return nil;
 
-    /** Reason */
-    NSString *_reason;
+    _applicationIdentifier = [applicationIdentifier retain];
+    _applicationVersion = [applicationVersion retain];
 
-    /** Ordered list of PLCrashReportStackFrame instances, or nil if unavailable. */
-    NSArray *_stackFrames;
+    return self;
 }
 
-- (id) initWithExceptionName: (NSString *) name reason: (NSString *) reason;
+- (void) dealloc {
+    [_applicationIdentifier release];
+    [_applicationVersion release];
+    [super dealloc];
+}
 
-- (id) initWithExceptionName: (NSString *) name 
-                      reason: (NSString *) reason
-                 stackFrames: (NSArray *) stackFrames;
-
-/**
- * The exception name.
- */
-@property(nonatomic, readonly) NSString *exceptionName;
-
-/**
- * The exception reason.
- */
-@property(nonatomic, readonly) NSString *exceptionReason;
-
-/* The exception's original call stack, as an array of PLCrashReportStackFrameInfo instances, or nil if unavailable.
- * This may be preserved across rethrow of an exception, and can be used to determine the original call stack. */
-@property(nonatomic, readonly) NSArray *stackFrames;
+@synthesize applicationIdentifier = _applicationIdentifier;
+@synthesize applicationVersion = _applicationVersion;
 
 @end

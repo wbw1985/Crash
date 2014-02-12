@@ -27,39 +27,51 @@
  */
 
 #import <Foundation/Foundation.h>
-#import "PLCrashReportThreadInfo.h"
 
+#import "PLCrashReportStackFrameInfo.h"
+#import "PLCrashReportRegisterInfo.h"
 
-@interface PLCrashReportExceptionInfo : NSObject {
+@interface PLCrashReportThreadInfo : NSObject {
 @private
-    /** Name */
-    NSString *_name;
+    /** The thread number. Should be unique within a given crash log. */
+    NSInteger _threadNumber;
 
-    /** Reason */
-    NSString *_reason;
-
-    /** Ordered list of PLCrashReportStackFrame instances, or nil if unavailable. */
+    /** Ordered list of PLCrashReportStackFrame instances */
     NSArray *_stackFrames;
+
+    /** YES if this thread crashed. */
+    BOOL _crashed;
+
+    /** List of PLCrashReportRegister instances. Will be empty if _crashed is NO. */
+    NSArray *_registers;
 }
 
-- (id) initWithExceptionName: (NSString *) name reason: (NSString *) reason;
-
-- (id) initWithExceptionName: (NSString *) name 
-                      reason: (NSString *) reason
-                 stackFrames: (NSArray *) stackFrames;
-
-/**
- * The exception name.
- */
-@property(nonatomic, readonly) NSString *exceptionName;
+- (id) initWithThreadNumber: (NSInteger) threadNumber
+                stackFrames: (NSArray *) stackFrames
+                    crashed: (BOOL) crashed
+                  registers: (NSArray *) registers;
 
 /**
- * The exception reason.
+ * Application thread number.
  */
-@property(nonatomic, readonly) NSString *exceptionReason;
+@property(nonatomic, readonly) NSInteger threadNumber;
 
-/* The exception's original call stack, as an array of PLCrashReportStackFrameInfo instances, or nil if unavailable.
- * This may be preserved across rethrow of an exception, and can be used to determine the original call stack. */
+/**
+ * Thread backtrace. Provides an array of PLCrashReportStackFrameInfo instances.
+ * The array is ordered, last callee to first.
+ */
 @property(nonatomic, readonly) NSArray *stackFrames;
+
+/**
+ * If this thread crashed, set to YES.
+ */
+@property(nonatomic, readonly) BOOL crashed;
+
+/**
+ * State of the general purpose and related registers, as a list of
+ * PLCrashReportRegister instances. If this thead did not crash (crashed returns NO),
+ * this list will be empty.
+ */
+@property(nonatomic, readonly) NSArray *registers;
 
 @end

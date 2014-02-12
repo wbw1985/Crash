@@ -27,39 +27,27 @@
  */
 
 #import <Foundation/Foundation.h>
-#import "PLCrashReportThreadInfo.h"
 
-
-@interface PLCrashReportExceptionInfo : NSObject {
+@interface PLCrashReportApplicationInfo : NSObject {
 @private
-    /** Name */
-    NSString *_name;
-
-    /** Reason */
-    NSString *_reason;
-
-    /** Ordered list of PLCrashReportStackFrame instances, or nil if unavailable. */
-    NSArray *_stackFrames;
+    /** Application identifier */
+    NSString *_applicationIdentifier;
+    
+    /** Application version */
+    NSString *_applicationVersion;
 }
 
-- (id) initWithExceptionName: (NSString *) name reason: (NSString *) reason;
-
-- (id) initWithExceptionName: (NSString *) name 
-                      reason: (NSString *) reason
-                 stackFrames: (NSArray *) stackFrames;
+- (id) initWithApplicationIdentifier: (NSString *) applicationIdentifier 
+                  applicationVersion: (NSString *) applicationVersion;
 
 /**
- * The exception name.
+ * The application identifier. This is usually the application's CFBundleIdentifier value.
  */
-@property(nonatomic, readonly) NSString *exceptionName;
+@property(nonatomic, readonly) NSString *applicationIdentifier;
 
 /**
- * The exception reason.
+ * The application version. This is usually the application's CFBundleVersion value.
  */
-@property(nonatomic, readonly) NSString *exceptionReason;
-
-/* The exception's original call stack, as an array of PLCrashReportStackFrameInfo instances, or nil if unavailable.
- * This may be preserved across rethrow of an exception, and can be used to determine the original call stack. */
-@property(nonatomic, readonly) NSArray *stackFrames;
+@property(nonatomic, readonly) NSString *applicationVersion;
 
 @end
